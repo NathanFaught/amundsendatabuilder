@@ -19,3 +19,4 @@ venv3/
 .pytest_cache
 **/coverage.xml
 **/htmlcov/**
+/tmp/*
