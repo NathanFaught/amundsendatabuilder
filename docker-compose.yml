@@ -9,7 +9,7 @@ services:
     volumes:
      - ./example:/example
      - ./databuilder:/databuilder
-     - ./tmp:/var/tmp
+     #- ./tmp:/var/tmp
     #command: python3 example/scripts/sample_data_loader.py es_amundsen neo4j_amundsen
     command: tail -f /dev/null
 

@@ -24,14 +24,15 @@ class MSSQLMetadataExtractor(Extractor):
 
     # SELECT statement from MS SQL to extract table and column metadata
     SQL_STATEMENT = """
-            SELECT DISTINCT {cluster_source} AS CLUSTER,
-                 TBL.TABLE_SCHEMA AS [SCHEMA_NAME],
-                 TBL.TABLE_NAME AS [NAME],
-                 CAST(PROP.VALUE AS NVARCHAR(MAX)) AS [DESCRIPTION],
-                 COL.COLUMN_NAME AS [COL_NAME],
-                 COL.DATA_TYPE AS [COL_TYPE],
-                 CAST(PROP_COL.VALUE AS NVARCHAR(MAX)) AS [COL_DESCRIPTION],
-                 COL.ORDINAL_POSITION AS COL_SORT_ORDER
+            SELECT DISTINCT {cluster_source} AS [cluster],
+                 TBL.TABLE_SCHEMA AS [schema_name],
+                 TBL.TABLE_NAME AS [name],
+                 CAST(PROP.VALUE AS NVARCHAR(MAX)) AS [description],
+                 COL.COLUMN_NAME AS [col_name],
+                 COL.DATA_TYPE AS [col_type],
+                 CAST(PROP_COL.VALUE AS NVARCHAR(MAX)) AS [col_description],
+                 COL.ORDINAL_POSITION AS [col_sort_order],
+                 @@SERVERNAME AS [host_name]
 FROM INFORMATION_SCHEMA.TABLES TBL
 INNER JOIN INFORMATION_SCHEMA.COLUMNS COL ON COL.TABLE_NAME = TBL.TABLE_NAME
 AND COL.TABLE_SCHEMA = TBL.TABLE_SCHEMA
@@ -47,6 +48,7 @@ ORDER BY CLUSTER,
          NAME,
          COL_SORT_ORDER;
     """
+    #WHERE TBL.TABLE_TYPE = 'base table' {where_clause_suffix}
 
     # CONFIG KEYS
     WHERE_CLAUSE_SUFFIX_KEY = 'where_clause_suffix'
