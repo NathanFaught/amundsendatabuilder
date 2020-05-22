@@ -14,4 +14,4 @@ RUN apt install msodbcsql17 -y
 
 RUN apt upgrade -y
 RUN apt-get clean -y
-RUN pip3 install -r /requirements.txt && python3 setup.py install
+RUN pip3 install -r /requirements.txt && python3 setup_custom.py install
