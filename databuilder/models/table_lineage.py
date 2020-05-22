@@ -77,19 +77,20 @@ class TableLineage(Neo4jCsvSerializable):
         for downstream_tab in self.downstream_deps:
             # every deps should follow '{db}://{cluster}.{schema}/{table}'
             # todo: if we change the table uri, we should change here.
-            m = re.match('(\w+)://(\w+)\.(\w+)\/(\w+\.?\w+)', downstream_tab)
             print ('downstream_tab',downstream_tab)
+            m = re.match('(\w+)://(\w+)\.(\w+)\/(\w+\.?\w+)', downstream_tab)
+            print (m)
             print ('self.db',self.db)
             print ('self.cluster',self.cluster)
             print ('self.schema',self.schema)
             print ('self.table',self.table)
-            print()
-            print ('db',m.group(1))
-            print ('cluster',m.group(2))
-            print ('schema',m.group(3))
-            print ('table',m.group(4))
-            
+
             if m:
+                print()
+                print ('db',m.group(1))
+                print ('cluster',m.group(2))
+                print ('schema',m.group(3))
+                print ('table',m.group(4))            
                 # if not match, skip those records
                 results.append({
                     RELATION_START_KEY: self.get_table_model_key(db=self.db,
