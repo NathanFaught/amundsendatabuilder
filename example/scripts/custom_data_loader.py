@@ -221,8 +221,8 @@ if __name__ == "__main__":
         run_table_column_job('example/sample_data/1a_table.csv', 'example/sample_data/1b_col.csv')
         run_csv_job('example/sample_data/2_column_stats.csv', 'test_table_column_stats',
                     'databuilder.models.table_stats.TableColumnStats')
-        run_csv_job('example/sample_data/4_table_lineage.csv', 'test_table_lineage',
-                    'databuilder.models.table_lineage.TableLineage')
+        #run_csv_job('example/sample_data/4_table_lineage.csv', 'test_table_lineage',
+        #            'databuilder.models.table_lineage.TableLineage')
         #run_csv_job('example/sample_data/sample_table_programmatic_source.csv', 'test_programmatic_source',
         #            'databuilder.models.table_metadata.TableMetadata')
         #run_csv_job('example/sample_data/sample_watermark.csv', 'test_watermark_metadata',
