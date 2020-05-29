@@ -2,7 +2,7 @@ import os
 from setuptools import setup, find_packages
 
 
-__version__ = '2.5.16'
+__version__ = '2.5.17'
 
 requirements_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
 with open(requirements_path) as requirements_file:
@@ -33,8 +33,8 @@ bigquery = [
 jsonpath = ['jsonpath_rw==1.4.0']
 
 db2 = [
-    'ibm_db',
-    'ibm-db-sa-py3'
+    'ibm_db==3.0.1',
+    'ibm-db-sa-py3==0.3.1-1'
 ]
 
 druid = [
