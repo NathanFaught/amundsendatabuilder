@@ -1,10 +1,13 @@
+# Copyright Contributors to the Amundsen project.
+# SPDX-License-Identifier: Apache-2.0
+
 import json
 import shutil
 import tempfile
 import unittest
 
-from pyhocon import ConfigFactory  # noqa: F401
-from typing import Any, List  # noqa: F401
+from pyhocon import ConfigFactory
+from typing import List
 
 from databuilder import Scoped
 from databuilder.loader.file_system_elasticsearch_json_loader import FSElasticsearchJSONLoader
@@ -13,8 +16,7 @@ from databuilder.models.table_elasticsearch_document import TableESDocument
 
 class TestFSElasticsearchJSONLoader(unittest.TestCase):
 
-    def setUp(self):
-        # type: () -> None
+    def setUp(self) -> None:
         self.temp_dir_path = tempfile.mkdtemp()
         self.dest_file_name = '{}/test_file.json'.format(self.temp_dir_path)
         self.file_mode = 'w'
@@ -22,12 +24,10 @@ class TestFSElasticsearchJSONLoader(unittest.TestCase):
                        'loader.filesystem.elasticsearch.mode': self.file_mode}
         self.conf = ConfigFactory.from_dict(config_dict)
 
-    def tearDown(self):
-        # type: () -> None
+    def tearDown(self) -> None:
         shutil.rmtree(self.temp_dir_path)
 
-    def _check_results_helper(self, expected):
-        # type: (List[str]) -> None
+    def _check_results_helper(self, expected: List[str]) -> None:
         """
         Helper function to compare results with expected outcome
         :param expected: expected result
@@ -38,8 +38,7 @@ class TestFSElasticsearchJSONLoader(unittest.TestCase):
                 self.assertDictEqual(json.loads(e), json.loads(actual))
             self.assertFalse(file.readline())
 
-    def test_empty_loading(self):
-        # type: () -> None
+    def test_empty_loading(self) -> None:
         """
         Test loading functionality with no data
         """
@@ -52,8 +51,7 @@ class TestFSElasticsearchJSONLoader(unittest.TestCase):
 
         self._check_results_helper(expected=[])
 
-    def test_loading_with_different_object(self):
-        # type: () -> None
+    def test_loading_with_different_object(self) -> None:
         """
         Test Loading functionality with a python Dict object
         """
@@ -72,7 +70,8 @@ class TestFSElasticsearchJSONLoader(unittest.TestCase):
                     column_descriptions=['test_comment1', 'test_comment2'],
                     total_usage=10,
                     unique_usage=5,
-                    tags=['test_tag1', 'test_tag2'])
+                    tags=['test_tag1', 'test_tag2'],
+                    programmatic_descriptions=['test'])
 
         with self.assertRaises(Exception) as context:
             loader.load(data)  # type: ignore
@@ -80,8 +79,7 @@ class TestFSElasticsearchJSONLoader(unittest.TestCase):
 
         loader.close()
 
-    def test_loading_with_single_object(self):
-        # type: () -> None
+    def test_loading_with_single_object(self) -> None:
         """
         Test Loading functionality with single python object
         """
@@ -102,7 +100,8 @@ class TestFSElasticsearchJSONLoader(unittest.TestCase):
                                unique_usage=5,
                                tags=['test_tag1', 'test_tag2'],
                                badges=['badge1'],
-                               schema_description='schema description')
+                               schema_description='schema description',
+                               programmatic_descriptions=['test'])
         loader.load(data)
         loader.close()
 
@@ -112,13 +111,14 @@ class TestFSElasticsearchJSONLoader(unittest.TestCase):
              '"column_names": ["test_col1", "test_col2"], "name": "test_table", '
              '"last_updated_timestamp": 123456789, "display_name": "test_schema.test_table", '
              '"description": "test_description", "unique_usage": 5, "total_usage": 10, '
-             '"tags": ["test_tag1", "test_tag2"], "badges": ["badge1"], "schema_description": "schema description"}')
+             '"tags": ["test_tag1", "test_tag2"], "schema_description": "schema description", '
+             '"programmatic_descriptions": ["test"], '
+             '"badges": ["badge1"]}')
         ]
 
         self._check_results_helper(expected=expected)
 
-    def test_loading_with_list_of_objects(self):
-        # type: () -> None
+    def test_loading_with_list_of_objects(self) -> None:
         """
         Test Loading functionality with list of objects.
         Check to ensure all objects are added to file
@@ -140,7 +140,8 @@ class TestFSElasticsearchJSONLoader(unittest.TestCase):
                                 unique_usage=5,
                                 tags=['test_tag1', 'test_tag2'],
                                 badges=['badge1'],
-                                schema_description='schema_description')] * 5
+                                schema_description='schema_description',
+                                programmatic_descriptions=['test'])] * 5
 
         for d in data:
             loader.load(d)
@@ -152,7 +153,9 @@ class TestFSElasticsearchJSONLoader(unittest.TestCase):
              '"column_names": ["test_col1", "test_col2"], "name": "test_table", '
              '"last_updated_timestamp": 123456789, "display_name": "test_schema.test_table", '
              '"description": "test_description", "unique_usage": 5, "total_usage": 10, '
-             '"tags": ["test_tag1", "test_tag2"], "badges": ["badge1"], "schema_description": "schema_description"}')
+             '"tags": ["test_tag1", "test_tag2"], "schema_description": "schema_description", '
+             '"programmatic_descriptions":["test"], '
+             '"badges": ["badge1"]}')
         ] * 5
 
         self._check_results_helper(expected=expected)

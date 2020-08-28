@@ -1,3 +1,6 @@
+# Copyright Contributors to the Amundsen project.
+# SPDX-License-Identifier: Apache-2.0
+
 import unittest
 
 from databuilder.models.dashboard.dashboard_query import DashboardQuery
@@ -8,24 +11,24 @@ from databuilder.models.neo4j_csv_serde import NODE_KEY, \
 
 class TestDashboardQuery(unittest.TestCase):
 
-    def test_create_nodes(self):
-        # type: () -> None
+    def test_create_nodes(self) -> None:
 
         dashboard_query = DashboardQuery(dashboard_group_id='dg_id',
                                          dashboard_id='d_id',
                                          query_id='q_id',
                                          query_name='q_name',
-                                         url='http://foo.bar/query/baz')
+                                         url='http://foo.bar/query/baz',
+                                         query_text='SELECT * FROM foo.bar')
 
         actual = dashboard_query.create_next_node()
         expected = {'url': 'http://foo.bar/query/baz', 'name': 'q_name', 'id': 'q_id',
+                    'query_text': 'SELECT * FROM foo.bar',
                     NODE_KEY: '_dashboard://gold.dg_id/d_id/query/q_id',
                     NODE_LABEL: DashboardQuery.DASHBOARD_QUERY_LABEL}
 
         self.assertEqual(expected, actual)
 
-    def test_create_relation(self):
-        # type: () -> None
+    def test_create_relation(self) -> None:
         dashboard_query = DashboardQuery(dashboard_group_id='dg_id',
                                          dashboard_id='d_id',
                                          query_id='q_id',

@@ -1,9 +1,12 @@
+# Copyright Contributors to the Amundsen project.
+# SPDX-License-Identifier: Apache-2.0
+
+
 import logging
-import six
 from collections import namedtuple
 
-from pyhocon import ConfigFactory, ConfigTree  # noqa: F401
-from typing import Iterator, Union, Dict, Any  # noqa: F401
+from pyhocon import ConfigFactory, ConfigTree
+from typing import Iterator, Union, Dict, Any
 from unidecode import unidecode
 
 from databuilder import Scoped
@@ -51,7 +54,10 @@ class SnowflakeMetadataExtractor(Extractor):
     WHERE_CLAUSE_SUFFIX_KEY = 'where_clause_suffix'
     CLUSTER_KEY = 'cluster_key'
     USE_CATALOG_AS_CLUSTER_NAME = 'use_catalog_as_cluster_name'
+    # Database Key, used to identify the database type in the UI.
     DATABASE_KEY = 'database_key'
+    # Snowflake Database Key, used to determine which Snowflake database to connect to.
+    SNOWFLAKE_DATABASE_KEY = 'snowflake_database'
 
     # Default values
     DEFAULT_CLUSTER_NAME = 'master'
@@ -60,11 +66,11 @@ class SnowflakeMetadataExtractor(Extractor):
         {WHERE_CLAUSE_SUFFIX_KEY: ' ',
          CLUSTER_KEY: DEFAULT_CLUSTER_NAME,
          USE_CATALOG_AS_CLUSTER_NAME: True,
-         DATABASE_KEY: 'prod'}
+         DATABASE_KEY: 'snowflake',
+         SNOWFLAKE_DATABASE_KEY: 'prod'}
     )
 
-    def init(self, conf):
-        # type: (ConfigTree) -> None
+    def init(self, conf: ConfigTree) -> None:
         conf = conf.with_fallback(SnowflakeMetadataExtractor.DEFAULT_CONFIG)
         self._cluster = '{}'.format(conf.get_string(SnowflakeMetadataExtractor.CLUSTER_KEY))
 
@@ -74,13 +80,12 @@ class SnowflakeMetadataExtractor(Extractor):
             cluster_source = "'{}'".format(self._cluster)
 
         self._database = conf.get_string(SnowflakeMetadataExtractor.DATABASE_KEY)
-        if six.PY2:
-            self._database = self._database.encode('utf-8', 'ignore')
+        self._snowflake_database = conf.get_string(SnowflakeMetadataExtractor.SNOWFLAKE_DATABASE_KEY)
 
         self.sql_stmt = SnowflakeMetadataExtractor.SQL_STATEMENT.format(
             where_clause_suffix=conf.get_string(SnowflakeMetadataExtractor.WHERE_CLAUSE_SUFFIX_KEY),
             cluster_source=cluster_source,
-            database=self._database
+            database=self._snowflake_database
         )
 
         LOGGER.info('SQL for snowflake metadata: {}'.format(self.sql_stmt))
@@ -90,10 +95,9 @@ class SnowflakeMetadataExtractor(Extractor):
             .with_fallback(ConfigFactory.from_dict({SQLAlchemyExtractor.EXTRACT_SQL: self.sql_stmt}))
 
         self._alchemy_extractor.init(sql_alch_conf)
-        self._extract_iter = None  # type: Union[None, Iterator]
+        self._extract_iter: Union[None, Iterator] = None
 
-    def extract(self):
-        # type: () -> Union[TableMetadata, None]
+    def extract(self) -> Union[TableMetadata, None]:
         if not self._extract_iter:
             self._extract_iter = self._get_extract_iter()
         try:
@@ -101,12 +105,10 @@ class SnowflakeMetadataExtractor(Extractor):
         except StopIteration:
             return None
 
-    def get_scope(self):
-        # type: () -> str
+    def get_scope(self) -> str:
         return 'extractor.snowflake'
 
-    def _get_extract_iter(self):
-        # type: () -> Iterator[TableMetadata]
+    def _get_extract_iter(self) -> Iterator[TableMetadata]:
         """
         Using itertools.groupby and raw level iterator, it groups to table and yields TableMetadata
         :return:
@@ -130,8 +132,7 @@ class SnowflakeMetadataExtractor(Extractor):
                                 columns,
                                 last_row['is_view'] == 'true')
 
-    def _get_raw_extract_iter(self):
-        # type: () -> Iterator[Dict[str, Any]]
+    def _get_raw_extract_iter(self) -> Iterator[Dict[str, Any]]:
         """
         Provides iterator of result row from SQLAlchemy extractor
         :return:
@@ -141,8 +142,7 @@ class SnowflakeMetadataExtractor(Extractor):
             yield row
             row = self._alchemy_extractor.extract()
 
-    def _get_table_key(self, row):
-        # type: (Dict[str, Any]) -> Union[TableKey, None]
+    def _get_table_key(self, row: Dict[str, Any]) -> Union[TableKey, None]:
         """
         Table key consists of schema and table name
         :param row:

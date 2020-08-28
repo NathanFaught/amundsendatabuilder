@@ -1,3 +1,6 @@
+# Copyright Contributors to the Amundsen project.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 This is a example script demonstrating how to load data into Neo4j and
 Elasticsearch without using an Airflow DAG.
@@ -14,14 +17,15 @@ It contains several jobs:
   and pubishes it into elasticsearch.
 
 For other available extractors, please take a look at
-https://github.com/lyft/amundsendatabuilder#list-of-extractors
+https://github.com/amundsen-io/amundsendatabuilder#list-of-extractors
 """
 
 import logging
+import os
 import sqlite3
 import sys
-import textwrap
 import uuid
+
 from elasticsearch import Elasticsearch
 from pyhocon import ConfigFactory
 from sqlalchemy.ext.declarative import declarative_base
@@ -32,32 +36,42 @@ from databuilder.extractor.neo4j_search_data_extractor import Neo4jSearchDataExt
 from databuilder.job.job import DefaultJob
 from databuilder.loader.file_system_elasticsearch_json_loader import FSElasticsearchJSONLoader
 from databuilder.loader.file_system_neo4j_csv_loader import FsNeo4jCSVLoader
+from databuilder.publisher.elasticsearch_constants import DASHBOARD_ELASTICSEARCH_INDEX_MAPPING, \
+    USER_ELASTICSEARCH_INDEX_MAPPING
 from databuilder.publisher.elasticsearch_publisher import ElasticsearchPublisher
 from databuilder.publisher.neo4j_csv_publisher import Neo4jCsvPublisher
 from databuilder.task.task import DefaultTask
+from databuilder.transformer.base_transformer import ChainedTransformer
 from databuilder.transformer.base_transformer import NoopTransformer
+from databuilder.transformer.dict_to_model import DictToModel, MODEL_CLASS
+from databuilder.transformer.generic_transformer import GenericTransformer, CALLBACK_FUNCTION, FIELD_NAME
 
-es_host = None
-neo_host = None
+es_host = os.getenv('CREDENTIALS_ELASTICSEARCH_PROXY_HOST', 'localhost')
+neo_host = os.getenv('CREDENTIALS_NEO4J_PROXY_HOST', 'localhost')
+
+es_port = os.getenv('CREDENTIALS_ELASTICSEARCH_PROXY_PORT', 9200)
+neo_port = os.getenv('CREDENTIALS_NEO4J_PROXY_PORT', 7687)
 if len(sys.argv) > 1:
     es_host = sys.argv[1]
 if len(sys.argv) > 2:
     neo_host = sys.argv[2]
 
 es = Elasticsearch([
-    {'host': es_host if es_host else 'localhost'},
+    {'host': es_host, 'port': es_port},
 ])
 
 DB_FILE = '/tmp/test.db'
 SQLITE_CONN_STRING = 'sqlite:////tmp/test.db'
 Base = declarative_base()
 
-NEO4J_ENDPOINT = 'bolt://{}:7687'.format(neo_host if neo_host else 'localhost')
+NEO4J_ENDPOINT = 'bolt://{}:{}'.format(neo_host, neo_port)
 
 neo4j_endpoint = NEO4J_ENDPOINT
 
 neo4j_user = 'neo4j'
 neo4j_password = 'test'
+
+LOGGER = logging.getLogger(__name__)
 
 
 def create_connection(db_file):
@@ -65,12 +79,12 @@ def create_connection(db_file):
         conn = sqlite3.connect(db_file)
         return conn
     except Exception:
-        logging.exception('exception')
+        LOGGER.exception('exception')
     return None
 
 
-def run_csv_job(file_loc, table_name, model):
-    tmp_folder = '/var/tmp/amundsen/{table_name}'.format(table_name=table_name)
+def run_csv_job(file_loc, job_name, model):
+    tmp_folder = '/var/tmp/amundsen/{job_name}'.format(job_name=job_name)
     node_files_folder = '{tmp_folder}/nodes'.format(tmp_folder=tmp_folder)
     relationship_files_folder = '{tmp_folder}/relationships'.format(tmp_folder=tmp_folder)
 
@@ -92,6 +106,7 @@ def run_csv_job(file_loc, table_name, model):
         'publisher.neo4j.neo4j_endpoint': neo4j_endpoint,
         'publisher.neo4j.neo4j_user': neo4j_user,
         'publisher.neo4j.neo4j_password': neo4j_password,
+        'publisher.neo4j.neo4j_encrypted': False,
         'publisher.neo4j.job_publish_tag': 'unique_tag',  # should use unique tag here like {ds}
     })
 
@@ -120,6 +135,7 @@ def run_table_column_job(table_path, column_path):
         'publisher.neo4j.neo4j_endpoint': neo4j_endpoint,
         'publisher.neo4j.neo4j_user': neo4j_user,
         'publisher.neo4j.neo4j_password': neo4j_password,
+        'publisher.neo4j.neo4j_encrypted': False,
         'publisher.neo4j.job_publish_tag': 'unique_tag',  # should use unique tag here like {ds}
     })
     job = DefaultJob(conf=job_config,
@@ -148,6 +164,7 @@ def create_last_updated_job():
         'publisher.neo4j.neo4j_endpoint': neo4j_endpoint,
         'publisher.neo4j.neo4j_user': neo4j_user,
         'publisher.neo4j.neo4j_password': neo4j_password,
+        'publisher.neo4j.neo4j_encrypted': False,
         'publisher.neo4j.job_publish_tag': 'unique_lastupdated_tag',  # should use unique tag here like {ds}
     })
 
@@ -156,19 +173,65 @@ def create_last_updated_job():
                       publisher=Neo4jCsvPublisher())
 
 
+def _str_to_list(str_val):
+    return str_val.split(',')
+
+
+def create_dashboard_tables_job():
+    # loader saves data to these folders and publisher reads it from here
+    tmp_folder = '/var/tmp/amundsen/dashboard_table'
+    node_files_folder = '{tmp_folder}/nodes'.format(tmp_folder=tmp_folder)
+    relationship_files_folder = '{tmp_folder}/relationships'.format(tmp_folder=tmp_folder)
+
+    csv_extractor = CsvExtractor()
+    csv_loader = FsNeo4jCSVLoader()
+
+    generic_transformer = GenericTransformer()
+    dict_to_model_transformer = DictToModel()
+    transformer = ChainedTransformer(transformers=[generic_transformer, dict_to_model_transformer],
+                                     is_init_transformers=True)
+
+    task = DefaultTask(extractor=csv_extractor,
+                       loader=csv_loader,
+                       transformer=transformer)
+    publisher = Neo4jCsvPublisher()
+
+    job_config = ConfigFactory.from_dict({
+        '{}.file_location'.format(csv_extractor.get_scope()): 'example/sample_data/sample_dashboard_table.csv',
+        '{}.{}.{}'.format(transformer.get_scope(), generic_transformer.get_scope(), FIELD_NAME): 'table_ids',
+        '{}.{}.{}'.format(transformer.get_scope(), generic_transformer.get_scope(), CALLBACK_FUNCTION): _str_to_list,
+        '{}.{}.{}'.format(transformer.get_scope(), dict_to_model_transformer.get_scope(), MODEL_CLASS):
+            'databuilder.models.dashboard.dashboard_table.DashboardTable',
+        '{}.node_dir_path'.format(csv_loader.get_scope()): node_files_folder,
+        '{}.relationship_dir_path'.format(csv_loader.get_scope()): relationship_files_folder,
+        '{}.delete_created_directories'.format(csv_loader.get_scope()): True,
+        '{}.node_files_directory'.format(publisher.get_scope()): node_files_folder,
+        '{}.relation_files_directory'.format(publisher.get_scope()): relationship_files_folder,
+        '{}.neo4j_endpoint'.format(publisher.get_scope()): neo4j_endpoint,
+        '{}.neo4j_user'.format(publisher.get_scope()): neo4j_user,
+        '{}.neo4j_password'.format(publisher.get_scope()): neo4j_password,
+        '{}.neo4j_encrypted'.format(publisher.get_scope()): False,
+        '{}.job_publish_tag'.format(publisher.get_scope()): 'unique_tag',  # should use unique tag here like {ds}
+    })
+
+    return DefaultJob(conf=job_config,
+                      task=task,
+                      publisher=publisher)
+
+
 def create_es_publisher_sample_job(elasticsearch_index_alias='table_search_index',
                                    elasticsearch_doc_type_key='table',
                                    model_name='databuilder.models.table_elasticsearch_document.TableESDocument',
-                                   cypher_query=None,
+                                   entity_type='table',
                                    elasticsearch_mapping=None):
     """
     :param elasticsearch_index_alias:  alias for Elasticsearch used in
                                        amundsensearchlibrary/search_service/config.py as an index
     :param elasticsearch_doc_type_key: name the ElasticSearch index is prepended with. Defaults to `table` resulting in
-                                       `table_search_index`
+                                       `table_{uuid}`
     :param model_name:                 the Databuilder model class used in transporting between Extractor and Loader
-    :param cypher_query:               Query handed to the `Neo4jSearchDataExtractor` class, if None is given (default)
-                                       it uses the `Table` query baked into the Extractor
+    :param entity_type:                Entity type handed to the `Neo4jSearchDataExtractor` class, used to determine
+                                       Cypher query to extract data from Neo4j. Defaults to `table`.
     :param elasticsearch_mapping:      Elasticsearch field mapping "DDL" handed to the `ElasticsearchPublisher` class,
                                        if None is given (default) it uses the `Table` query baked into the Publisher
     """
@@ -182,13 +245,15 @@ def create_es_publisher_sample_job(elasticsearch_index_alias='table_search_index
     # elastic search client instance
     elasticsearch_client = es
     # unique name of new index in Elasticsearch
-    elasticsearch_new_index_key = 'tables' + str(uuid.uuid4())
+    elasticsearch_new_index_key = '{}_'.format(elasticsearch_doc_type_key) + str(uuid.uuid4())
 
     job_config = ConfigFactory.from_dict({
+        'extractor.search_data.entity_type': entity_type,
         'extractor.search_data.extractor.neo4j.graph_url': neo4j_endpoint,
         'extractor.search_data.extractor.neo4j.model_class': model_name,
         'extractor.search_data.extractor.neo4j.neo4j_auth_user': neo4j_user,
         'extractor.search_data.extractor.neo4j.neo4j_auth_pw': neo4j_password,
+        'extractor.search_data.extractor.neo4j.neo4j_encrypted': False,
         'loader.filesystem.elasticsearch.file_path': extracted_search_data_path,
         'loader.filesystem.elasticsearch.mode': 'w',
         'publisher.elasticsearch.file_path': extracted_search_data_path,
@@ -200,9 +265,6 @@ def create_es_publisher_sample_job(elasticsearch_index_alias='table_search_index
     })
 
     # only optionally add these keys, so need to dynamically `put` them
-    if cypher_query:
-        job_config.put('extractor.search_data.{}'.format(Neo4jSearchDataExtractor.CYPHER_QUERY_CONFIG_KEY),
-                       cypher_query)
     if elasticsearch_mapping:
         job_config.put('publisher.elasticsearch.{}'.format(ElasticsearchPublisher.ELASTICSEARCH_MAPPING_CONFIG_KEY),
                        elasticsearch_mapping)
@@ -241,95 +303,42 @@ if __name__ == "__main__":
                     'databuilder.models.table_last_updated.TableLastUpdated')
         run_csv_job('example/sample_data/sample_schema_description.csv', 'test_schema_description',
                     'databuilder.models.schema.schema.SchemaModel')
+        run_csv_job('example/sample_data/sample_dashboard_base.csv', 'test_dashboard_base',
+                    'databuilder.models.dashboard.dashboard_metadata.DashboardMetadata')
+        run_csv_job('example/sample_data/sample_dashboard_usage.csv', 'test_dashboard_usage',
+                    'databuilder.models.dashboard.dashboard_usage.DashboardUsage')
+        run_csv_job('example/sample_data/sample_dashboard_owner.csv', 'test_dashboard_owner',
+                    'databuilder.models.dashboard.dashboard_owner.DashboardOwner')
+        run_csv_job('example/sample_data/sample_dashboard_query.csv', 'test_dashboard_query',
+                    'databuilder.models.dashboard.dashboard_query.DashboardQuery')
+        run_csv_job('example/sample_data/sample_dashboard_last_execution.csv', 'test_dashboard_last_execution',
+                    'databuilder.models.dashboard.dashboard_execution.DashboardExecution')
+        run_csv_job('example/sample_data/sample_dashboard_last_modified.csv', 'test_dashboard_last_modified',
+                    'databuilder.models.dashboard.dashboard_last_modified.DashboardLastModifiedTimestamp')
+
+        create_dashboard_tables_job().launch()
 
         create_last_updated_job().launch()
 
         job_es_table = create_es_publisher_sample_job(
             elasticsearch_index_alias='table_search_index',
             elasticsearch_doc_type_key='table',
+            entity_type='table',
             model_name='databuilder.models.table_elasticsearch_document.TableESDocument')
         job_es_table.launch()
-
-        user_cypher_query = textwrap.dedent(
-            """
-            MATCH (user:User)
-            OPTIONAL MATCH (user)-[read:READ]->(a)
-            OPTIONAL MATCH (user)-[own:OWNER_OF]->(b)
-            OPTIONAL MATCH (user)-[follow:FOLLOWED_BY]->(c)
-            OPTIONAL MATCH (user)-[manage_by:MANAGE_BY]->(manager)
-            with user, a, b, c, read, own, follow, manager
-            where user.full_name is not null
-            return user.email as email, user.first_name as first_name, user.last_name as last_name,
-            user.full_name as full_name, user.github_username as github_username, user.team_name as team_name,
-            user.employee_type as employee_type, manager.email as manager_email, user.slack_id as slack_id,
-            user.role_name as role_name, user.is_active as is_active,
-            REDUCE(sum_r = 0, r in COLLECT(DISTINCT read)| sum_r + r.read_count) AS total_read,
-            count(distinct b) as total_own,
-            count(distinct c) AS total_follow
-            order by user.email
-            """
-        )
-
-        user_elasticsearch_mapping = """
-                {
-                  "mappings":{
-                    "user":{
-                      "properties": {
-                        "email": {
-                          "type":"text",
-                          "analyzer": "simple",
-                          "fields": {
-                            "raw": {
-                              "type": "keyword"
-                            }
-                          }
-                        },
-                        "first_name": {
-                          "type":"text",
-                          "analyzer": "simple",
-                          "fields": {
-                            "raw": {
-                              "type": "keyword"
-                            }
-                          }
-                        },
-                        "last_name": {
-                          "type":"text",
-                          "analyzer": "simple",
-                          "fields": {
-                            "raw": {
-                              "type": "keyword"
-                            }
-                          }
-                        },
-                        "full_name": {
-                          "type":"text",
-                          "analyzer": "simple",
-                          "fields": {
-                            "raw": {
-                              "type": "keyword"
-                            }
-                          }
-                        },
-                        "total_read":{
-                          "type": "long"
-                        },
-                        "total_own": {
-                          "type": "long"
-                        },
-                        "total_follow": {
-                          "type": "long"
-                        }
-                      }
-                    }
-                  }
-                }
-            """
 
         job_es_user = create_es_publisher_sample_job(
             elasticsearch_index_alias='user_search_index',
             elasticsearch_doc_type_key='user',
             model_name='databuilder.models.user_elasticsearch_document.UserESDocument',
-            cypher_query=user_cypher_query,
-            elasticsearch_mapping=user_elasticsearch_mapping)
+            entity_type='user',
+            elasticsearch_mapping=USER_ELASTICSEARCH_INDEX_MAPPING)
         job_es_user.launch()
+
+        job_es_dashboard = create_es_publisher_sample_job(
+            elasticsearch_index_alias='dashboard_search_index',
+            elasticsearch_doc_type_key='dashboard',
+            model_name='databuilder.models.dashboard_elasticsearch_document.DashboardESDocument',
+            entity_type='dashboard',
+            elasticsearch_mapping=DASHBOARD_ELASTICSEARCH_INDEX_MAPPING)
+        job_es_dashboard.launch()

@@ -1,3 +1,6 @@
+# Copyright Contributors to the Amundsen project.
+# SPDX-License-Identifier: Apache-2.0
+
 import copy
 import csv
 import ctypes
@@ -8,11 +11,12 @@ from os import listdir
 from os.path import isfile, join
 from string import Template
 
-import six
-from neo4j.v1 import GraphDatabase, Transaction  # noqa: F401
-from pyhocon import ConfigFactory  # noqa: F401
-from pyhocon import ConfigTree  # noqa: F401
-from typing import Set, List  # noqa: F401
+from neo4j import GraphDatabase, Transaction
+import neo4j
+from neo4j.exceptions import CypherError
+from pyhocon import ConfigFactory
+from pyhocon import ConfigTree
+from typing import Set, List
 
 from databuilder.publisher.base_publisher import Publisher
 from databuilder.publisher.neo4j_preprocessor import NoopRelationPreprocessor
@@ -44,6 +48,10 @@ NEO4J_CREATE_ONLY_NODES = 'neo4j_create_only_nodes'
 
 NEO4J_USER = 'neo4j_user'
 NEO4J_PASSWORD = 'neo4j_password'
+NEO4J_ENCRYPTED = 'neo4j_encrypted'
+"""NEO4J_ENCRYPTED is a boolean indicating whether to use SSL/TLS when connecting."""
+NEO4J_VALIDATE_SSL = 'neo4j_validate_ssl'
+"""NEO4J_VALIDATE_SSL is a boolean indicating whether to validate the server's SSL/TLS cert against system CAs."""
 
 # This will be used to provide unique tag to the node and relationship
 JOB_PUBLISH_TAG = 'job_publish_tag'
@@ -88,6 +96,8 @@ DEFAULT_CONFIG = ConfigFactory.from_dict({NEO4J_TRANSCATION_SIZE: 500,
                                           NEO4J_PROGRESS_REPORT_FREQUENCY: 500,
                                           NEO4J_RELATIONSHIP_CREATION_CONFIRM: False,
                                           NEO4J_MAX_CONN_LIFE_TIME_SEC: 50,
+                                          NEO4J_ENCRYPTED: True,
+                                          NEO4J_VALIDATE_SSL: False,
                                           RELATION_PREPROCESSOR: NoopRelationPreprocessor()})
 
 NODE_MERGE_TEMPLATE = Template("""MERGE (node:$LABEL {key: '${KEY}'})
@@ -117,15 +127,13 @@ class Neo4jCsvPublisher(Publisher):
     #TODO User UNWIND batch operation for better performance
     """
 
-    def __init__(self):
-        # type: () -> None
+    def __init__(self) -> None:
         super(Neo4jCsvPublisher, self).__init__()
 
-    def init(self, conf):
-        # type: (ConfigTree) -> None
+    def init(self, conf: ConfigTree) -> None:
         conf = conf.with_fallback(DEFAULT_CONFIG)
 
-        self._count = 0  # type: int
+        self._count: int = 0
         self._progress_report_frequency = conf.get_int(NEO4J_PROGRESS_REPORT_FREQUENCY)
         self._node_files = self._list_files(conf, NODE_FILES_DIR)
         self._node_files_iter = iter(self._node_files)
@@ -133,10 +141,14 @@ class Neo4jCsvPublisher(Publisher):
         self._relation_files = self._list_files(conf, RELATION_FILES_DIR)
         self._relation_files_iter = iter(self._relation_files)
 
+        trust = neo4j.TRUST_SYSTEM_CA_SIGNED_CERTIFICATES if conf.get_bool(NEO4J_VALIDATE_SSL) \
+            else neo4j.TRUST_ALL_CERTIFICATES
         self._driver = \
             GraphDatabase.driver(conf.get_string(NEO4J_END_POINT_KEY),
                                  max_connection_life_time=conf.get_int(NEO4J_MAX_CONN_LIFE_TIME_SEC),
-                                 auth=(conf.get_string(NEO4J_USER), conf.get_string(NEO4J_PASSWORD)))
+                                 auth=(conf.get_string(NEO4J_USER), conf.get_string(NEO4J_PASSWORD)),
+                                 encrypted=conf.get_bool(NEO4J_ENCRYPTED),
+                                 trust=trust)
         self._transaction_size = conf.get_int(NEO4J_TRANSCATION_SIZE)
         self._session = self._driver.session()
         self._confirm_rel_created = conf.get_bool(NEO4J_RELATIONSHIP_CREATION_CONFIRM)
@@ -144,8 +156,8 @@ class Neo4jCsvPublisher(Publisher):
         # config is list of node label.
         # When set, this list specifies a list of nodes that shouldn't be updated, if exists
         self.create_only_nodes = set(conf.get_list(NEO4J_CREATE_ONLY_NODES, default=[]))
-        self.labels = set()  # type: Set[str]
-        self.publish_tag = conf.get_string(JOB_PUBLISH_TAG)  # type: str
+        self.labels: Set[str] = set()
+        self.publish_tag: str = conf.get_string(JOB_PUBLISH_TAG)
         if not self.publish_tag:
             raise Exception('{} should not be empty'.format(JOB_PUBLISH_TAG))
 
@@ -154,8 +166,7 @@ class Neo4jCsvPublisher(Publisher):
         LOGGER.info('Publishing Node csv files {}, and Relation CSV files {}'
                     .format(self._node_files, self._relation_files))
 
-    def _list_files(self, conf, path_key):
-        # type: (ConfigTree, str) -> List[str]
+    def _list_files(self, conf: ConfigTree, path_key: str) -> List[str]:
         """
         List files from directory
         :param conf:
@@ -168,8 +179,7 @@ class Neo4jCsvPublisher(Publisher):
         path = conf.get_string(path_key)
         return [join(path, f) for f in listdir(path) if isfile(join(path, f))]
 
-    def publish_impl(self):  # noqa: C901
-        # type: () -> None
+    def publish_impl(self) -> None:  # noqa: C901
         """
         Publishes Nodes first and then Relations
         :return:
@@ -210,17 +220,15 @@ class Neo4jCsvPublisher(Publisher):
                 tx.rollback()
             raise e
 
-    def get_scope(self):
-        # type: () -> str
+    def get_scope(self) -> str:
         return 'publisher.neo4j'
 
-    def _create_indices(self, node_file):
+    def _create_indices(self, node_file: str) -> None:
         """
         Go over the node file and try creating unique index
         :param node_file:
         :return:
         """
-        # type: (str) -> None
         LOGGER.info('Creating indices. (Existing indices will be ignored)')
 
         with open(node_file, 'r', encoding='utf8') as node_csv:
@@ -232,8 +240,7 @@ class Neo4jCsvPublisher(Publisher):
 
         LOGGER.info('Indices have been created.')
 
-    def _publish_node(self, node_file, tx):
-        # type: (str, Transaction) -> Transaction
+    def _publish_node(self, node_file: str, tx: Transaction) -> Transaction:
         """
         Iterate over the csv records of a file, each csv record transform to Merge statement and will be executed.
         All nodes should have a unique key, and this method will try to create unique index on the LABEL when it sees
@@ -257,8 +264,7 @@ class Neo4jCsvPublisher(Publisher):
                 tx = self._execute_statement(stmt, tx)
         return tx
 
-    def is_create_only_node(self, node_record):
-        # type: (dict) -> bool
+    def is_create_only_node(self, node_record: dict) -> bool:
         """
         Check if node can be updated
         :param node_record:
@@ -269,8 +275,7 @@ class Neo4jCsvPublisher(Publisher):
         else:
             return False
 
-    def create_node_merge_statement(self, node_record):
-        # type: (dict) -> str
+    def create_node_merge_statement(self, node_record: dict) -> str:
         """
         Creates node merge statement
         :param node_record:
@@ -287,8 +292,7 @@ class Neo4jCsvPublisher(Publisher):
 
         return NODE_MERGE_TEMPLATE.substitute(params)
 
-    def _publish_relation(self, relation_file, tx):
-        # type: (str, Transaction) -> Transaction
+    def _publish_relation(self, relation_file: str, tx: Transaction) -> Transaction:
         """
         Creates relation between two nodes.
         (In Amundsen, all relation is bi-directional)
@@ -331,8 +335,7 @@ class Neo4jCsvPublisher(Publisher):
 
         return tx
 
-    def create_relationship_merge_statement(self, rel_record):
-        # type: (dict) -> str
+    def create_relationship_merge_statement(self, rel_record: dict) -> str:
         """
         Creates relationship merge statement
         :param rel_record:
@@ -356,10 +359,9 @@ ON MATCH SET {update_prop_body}""".format(create_prop_body=create_prop_body,
         return RELATION_MERGE_TEMPLATE.substitute(param)
 
     def _create_props_body(self,
-                           record_dict,
-                           excludes,
-                           identifier):
-        # type: (dict, Set, str) -> str
+                           record_dict: dict,
+                           excludes: Set,
+                           identifier: str) -> str:
         """
         Creates properties body with params required for resolving template.
 
@@ -374,16 +376,16 @@ ON MATCH SET {update_prop_body}""".format(create_prop_body=create_prop_body,
         """
         template_params = {}
         props = []
-        for k, v in six.iteritems(record_dict):
+        for k, v in record_dict.items():
             if k in excludes:
                 template_params[k] = v
                 continue
 
-            # escape quote for Cypher query
             # if isinstance(str, v):
-            v = v.replace('\'', "\\'")
             # escape backslash for Cypher query
-            v = v.replace("\\", "\\")
+            v = v.replace('\\', '\\\\')
+            # escape quote for Cypher query
+            v = v.replace('\'', "\\'")
 
             if k.endswith(UNQUOTED_SUFFIX):
                 k = k[:-len(UNQUOTED_SUFFIX)]
@@ -404,12 +406,10 @@ ON MATCH SET {update_prop_body}""".format(create_prop_body=create_prop_body,
         return ', '.join(props)
 
     def _execute_statement(self,
-                           stmt,
-                           tx,
-                           params=None,
-                           expect_result=False):
-        # type: (str, Transaction, bool) -> Transaction
-
+                           stmt: str,
+                           tx: Transaction,
+                           params: bool=None,
+                           expect_result: bool=False) -> Transaction:
         """
         Executes statement against Neo4j. If execution fails, it rollsback and raise exception.
         If 'expect_result' flag is True, it confirms if result object is not null.
@@ -423,10 +423,7 @@ ON MATCH SET {update_prop_body}""".format(create_prop_body=create_prop_body,
             if LOGGER.isEnabledFor(logging.DEBUG):
                 LOGGER.debug('Executing statement: {} with params {}'.format(stmt, params))
 
-            if six.PY2:
-                result = tx.run(unicode(stmt, errors='ignore'), parameters=params)  # noqa
-            else:
-                result = tx.run(str(stmt).encode('utf-8', 'ignore'), parameters=params)
+            result = tx.run(str(stmt).encode('utf-8', 'ignore'), parameters=params)
             if expect_result and not result.single():
                 raise RuntimeError('Failed to executed statement: {}'.format(stmt))
 
@@ -446,12 +443,10 @@ ON MATCH SET {update_prop_body}""".format(create_prop_body=create_prop_body,
                 tx.rollback()
             raise e
 
-    def _try_create_index(self,
-                          label):
-        # type: (str) -> None
+    def _try_create_index(self, label: str) -> None:
         """
         For any label seen first time for this publisher it will try to create unique index.
-        There's no side effect on Neo4j side issuing index creation for existing index.
+        Neo4j ignores a second creation in 3.x, but raises an error in 4.x.
         :param label:
         :return:
         """
@@ -459,4 +454,9 @@ ON MATCH SET {update_prop_body}""".format(create_prop_body=create_prop_body,
         LOGGER.info('Trying to create index for label {label} if not exist: {stmt}'.format(label=label,
                                                                                            stmt=stmt))
         with self._driver.session() as session:
-            session.run(stmt)
+            try:
+                session.run(stmt)
+            except CypherError as e:
+                if 'An equivalent constraint already exists' not in e.__str__():
+                    raise
+                # Else, swallow the exception, to make this function idempotent.

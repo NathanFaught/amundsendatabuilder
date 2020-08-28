@@ -1,3 +1,6 @@
+# Copyright Contributors to the Amundsen project.
+# SPDX-License-Identifier: Apache-2.0
+
 import textwrap
 
 # Documentation: https://www.elastic.co/guide/en/elasticsearch/reference/current/mapping.html
@@ -16,7 +19,6 @@ TABLE_ELASTICSEARCH_INDEX_MAPPING = textwrap.dedent(
             "name": {
               "type":"text",
               "analyzer": "simple",
-              "search_analyzer": "whitespace",
               "fields": {
                 "raw": {
                   "type": "keyword"
@@ -26,7 +28,6 @@ TABLE_ELASTICSEARCH_INDEX_MAPPING = textwrap.dedent(
             "schema": {
               "type":"text",
               "analyzer": "simple",
-              "search_analyzer": "whitespace",
               "fields": {
                 "raw": {
                   "type": "keyword"
@@ -42,12 +43,11 @@ TABLE_ELASTICSEARCH_INDEX_MAPPING = textwrap.dedent(
             },
             "description": {
               "type": "text",
-              "analyzer": "simple",
-              "search_analyzer": "whitespace"
+              "analyzer": "simple"
             },
             "column_names": {
               "type":"text",
-              "analyzer": "whitespace",
+              "analyzer": "simple",
               "fields": {
                 "raw": {
                   "type": "keyword"
@@ -56,8 +56,7 @@ TABLE_ELASTICSEARCH_INDEX_MAPPING = textwrap.dedent(
             },
             "column_descriptions": {
               "type": "text",
-              "analyzer": "simple",
-              "search_analyzer": "whitespace"
+              "analyzer": "simple"
             },
             "tags": {
               "type": "keyword"
@@ -70,7 +69,7 @@ TABLE_ELASTICSEARCH_INDEX_MAPPING = textwrap.dedent(
             },
             "database": {
               "type": "text",
-              "analyzer": "whitespace",
+              "analyzer": "simple",
               "fields": {
                 "raw": {
                   "type": "keyword"
@@ -85,6 +84,10 @@ TABLE_ELASTICSEARCH_INDEX_MAPPING = textwrap.dedent(
             },
             "unique_usage": {
               "type": "long"
+            },
+            "programmatic_descriptions": {
+              "type": "text",
+              "analyzer": "simple"
             }
           }
         }
@@ -96,6 +99,17 @@ TABLE_ELASTICSEARCH_INDEX_MAPPING = textwrap.dedent(
 DASHBOARD_ELASTICSEARCH_INDEX_MAPPING = textwrap.dedent(
     """
     {
+        "settings": {
+          "analysis": {
+            "normalizer": {
+              "lowercase_normalizer": {
+                "type": "custom",
+                "char_filter": [],
+                "filter": ["lowercase", "asciifolding"]
+              }
+            }
+          }
+        },
         "mappings":{
             "dashboard":{
               "properties": {
@@ -104,7 +118,8 @@ DASHBOARD_ELASTICSEARCH_INDEX_MAPPING = textwrap.dedent(
                   "analyzer": "simple",
                   "fields": {
                     "raw": {
-                      "type": "keyword"
+                      "type": "keyword",
+                      "normalizer": "lowercase_normalizer"
                     }
                   }
                 },
@@ -113,7 +128,8 @@ DASHBOARD_ELASTICSEARCH_INDEX_MAPPING = textwrap.dedent(
                   "analyzer": "simple",
                   "fields": {
                     "raw": {
-                      "type": "keyword"
+                      "type": "keyword",
+                      "normalizer": "lowercase_normalizer"
                     }
                   }
                 },
@@ -143,12 +159,17 @@ DASHBOARD_ELASTICSEARCH_INDEX_MAPPING = textwrap.dedent(
                       "type": "keyword"
                     }
                   }
+                },
+                "tags": {
+                  "type": "keyword"
+                },
+                "badges": {
+                  "type": "keyword"
                 }
               }
             }
           }
         }
-
     """
 )
 
